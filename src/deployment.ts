@@ -11,7 +11,7 @@ import { runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra
 import { SetupError } from './setup.ts'
 
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
-const absolute = (description: string) => s.string().pattern(/^\//).description(`${description} Absolute path.`)
+const absolute = (description: string) => s.string().pattern(/^(?:[A-Za-z]:[\\/]|\/)/).description(`${description} Absolute path.`)
 /** Plugin configuration of the dsh-superagent entry. Volatile fields apply without a restart because dsh-superagent reads them on each use; changing `stateDir` remounts the plugin. */
 // The explicit `any` hides schemastery's internal inferred type, which is not portable across .d.ts emit; the shape is `DeploymentConfig`.
 export const Config: any = s.object({
