@@ -1,10 +1,8 @@
 /** Executor Session tools for reading ticket context, acknowledging requests, managing threads, handing back out-of-scope triggers, and reporting status. */
-import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { z } from 'zod'
 import { liveTicket, type EngineForExecutor, type Ticket } from '../../core/index.ts'
-import type { Project } from '../../deployment.ts'
-import { applyTicket } from '../apply.ts'
+import { applyTicket, type ApplyHost } from '../apply.ts'
 import { IM_WORDS } from '../../infra/text.ts'
 import { claimPull, readPull } from '../../sources/github-pull.ts'
 import type { SourceContext } from '../../sources/host.ts'
@@ -14,17 +12,14 @@ import { reportRelay, threadFollowedNotice } from '../notices.ts'
 import type { Sessions } from '../sessions.ts'
 import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 
-export interface ExecutorToolsHost {
-  readonly context: Pick<Context, 'subprocess'>
-  readonly stateDir: string
-  readonly project: (ticket: Ticket) => Project | undefined
+export interface ExecutorToolsHost extends ApplyHost {
   readonly engine: Pick<EngineForExecutor, 'report' | 'reply' | 'markUnrelated' | 'handback' | 'followForContext'>
-  readonly store: Pick<Store, 'tickets' | 'replyStatus' | 'atomic'>
+  readonly store: ApplyHost['store'] & Pick<Store, 'replyStatus' | 'atomic'>
   readonly sessions: Pick<Sessions, 'relay' | 'notify'>
   readonly resources: ResourceHost
   /** GitHub Source context whose pull-request rules govern claiming a reported PR. */
   readonly github: SourceContext
-  sendReplies(): Promise<void>
+  sendReplies(id: string): Promise<void>
 }
 
 export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
@@ -41,7 +36,7 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
       }).strict(),
       execute: async args => {
         const reply = host.engine.reply({ purpose: 'acknowledgement', ticketId, triggerId: args.trigger_id, text: args.text })
-        if (reply.status !== 'sent') await host.sendReplies()
+        if (reply.status === 'pending') await host.sendReplies(reply.id)
         return { trigger_id: args.trigger_id, acknowledgement: host.store.replyStatus(reply.id)!, reused: reply.reused }
       },
     }),
@@ -71,9 +66,9 @@ export function executorTools(host: ExecutorToolsHost, ticket: Ticket): Tool[] {
     }),
     tool({
       name: 'orchestrator_ticket_apply',
-      description: 'Apply this finished ticket to its local project when the person asks 应用/合并/apply: git mode merges the agent branch into the project checkout, copy mode backs up and syncs the ticket copy back. Do not apply before the latest report is ready and do not repeat an already applied ticket.',
-      schema: z.object({}).strict(),
-      execute: async () => applyTicket(host, ticketId),
+      description: 'Apply this ticket after it reports ready when the operator asks 应用, 合并, or apply. Supply the trigger ID of that exact message.',
+      schema: z.object({ trigger_id: z.string() }).strict(),
+      execute: async args => applyTicket(host, ticketId, args.trigger_id),
     }),
     tool({
       name: 'orchestrator_trigger_handback',

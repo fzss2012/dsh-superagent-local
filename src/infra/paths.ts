@@ -1,6 +1,6 @@
 /** Resolves packaged asset paths from either the source tree or the compiled lib/ output. */
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 let cached: string | undefined
@@ -18,3 +18,9 @@ export function packageRoot(): string {
   throw new Error('dsh-superagent package root not found')
 }
 export const packagePath = (...parts: string[]): string => join(packageRoot(), ...parts)
+
+/** Whether a resolved path is the directory itself or one of its descendants. */
+export function withinDirectory(directory: string, path: string): boolean {
+  const child = relative(directory, path)
+  return !isAbsolute(child) && child !== '..' && !child.startsWith(`..${sep}`)
+}

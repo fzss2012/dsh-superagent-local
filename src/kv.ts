@@ -3,6 +3,7 @@
  * Readers and writers refer to a record by its entry here so each key is spelled once with its value type.
  */
 import type { PromptVersion } from './app/prompts.ts'
+import type { ApplyResult } from './app/apply.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { Retry } from './sources/github.ts'
@@ -53,6 +54,7 @@ export const KV = {
    * to last-seen timestamp; and per-polled-thread seen message IDs and initialization flag.
    */
   feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
+    applied: family<ApplyResult, [triggerId: string, ticketId: string]>('feishu-applied:'),
     topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },
 }

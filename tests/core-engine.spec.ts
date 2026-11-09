@@ -1281,12 +1281,12 @@ describe('gaps', () => {
     h.tick(1); h.engine.receive(trigger('2')); h.settle()
     h.engine.report(ticketId, { state: 'progress', summary: 'It reads the config.', answers: '2' })
     expect(h.engine.reply({ purpose: 'answer', triggerId: '2', text: 'It reads the config.' })).toMatchObject({ reused: false })
-    expect(() => h.engine.reply({ purpose: 'answer', triggerId: '2', text: 'Something else.' })).toThrow(new UserError('noAnswer'))
+    expect(h.engine.reply({ purpose: 'answer', triggerId: '2', text: 'Something else.' })).toMatchObject({ reused: true })
     expect(() => h.engine.reply({ purpose: 'result', ticketId, text: 'Done' })).toThrow(new UserError('notReady'))
     h.engine.report(ticketId, { state: 'ready', summary: 'Done' })
     const sent = h.outbox.length
     expect(h.engine.reply({ purpose: 'result', ticketId, text: 'Done' })).toMatchObject({ reused: false })
-    expect(h.engine.reply({ purpose: 'result', ticketId, text: 'Done' })).toMatchObject({ reused: true })
+    expect(h.engine.reply({ purpose: 'result', ticketId, triggerId: '1', text: 'The work is ready.' })).toMatchObject({ reused: true })
     expect(h.outbox).toHaveLength(sent + 1)
     // A ticket whose PR closed unmerged, or that a person stopped, has no result to send.
     const closed = accepted(h, '5', 't5').ticketId!
@@ -1296,6 +1296,17 @@ describe('gaps', () => {
     const stopped = accepted(h, '6', 't6').ticketId!
     h.engine.stopTicket(stopped)
     expect(() => h.engine.reply({ purpose: 'result', ticketId: stopped, text: 'x' })).toThrow(new UserError('notReady'))
+  })
+  it('sends a requested ticket result once to the command channel', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    h.engine.report(ticketId, { state: 'ready', summary: 'Done' })
+    const channel = { source: 'chat', thread: 'elsewhere', address: { message: '2' } }
+    h.engine.receive(trigger('2', { threads: [{ source: 'chat', id: 'elsewhere' }], channel }))
+    const result = h.engine.reply({ purpose: 'result', ticketId, triggerId: '2', text: 'Detail' })
+    expect(h.outbox.at(-1)).toMatchObject({ id: result.id, channel })
+    expect(h.engine.reply({ purpose: 'result', ticketId, triggerId: '2', text: 'Reworded detail' })).toMatchObject({ id: result.id, reused: true })
+    expect(h.engine.reply({ purpose: 'result', ticketId, text: 'Done' }).id).not.toBe(result.id)
   })
   it('keeps an Eval\'s deadline on a repeated delivery, refuses to queue a held Trigger again, and puts expired Triggers first', () => {
     const h = harness()

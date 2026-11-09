@@ -400,7 +400,7 @@ declare class SourceRegistry implements SourceScope {
    * Sends a message idempotently through its Channel's kind; returns `'waiting'` while the kind is not installed, or
    * `'gone'` when the target (or a kind without channels) can never receive it.
    */
-  send(message: OutboundMessage, commands: Commands): Promise<'sent' | 'gone' | 'waiting'>;
+  send(message: OutboundMessage, commands: Commands, progress?: DeliveryProgress): Promise<'sent' | 'gone' | 'waiting'>;
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink;
   find(query: string): {
     threads: string[];
@@ -852,6 +852,11 @@ interface ChannelLink {
   triggerId?: string;
 }
 type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>;
+/** Confirmed parts of a multipart reply, in delivery order starting with the text. */
+interface DeliveryProgress {
+  readonly nextPart: number;
+  sent(nextPart: number): void;
+}
 /** Outbound messaging adapter for a source kind's threads. */
 interface SourceChannel<C> {
   /** Whether a reply may still go to `address`; without it, every address may receive replies. */
@@ -860,7 +865,7 @@ interface SourceChannel<C> {
    * Sends a message idempotently by ID; returns `'gone'` when the target conversation no longer accepts replies.
    * @throws when delivery failed but may succeed on a later retry.
    */
-  send(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'>;
+  send(host: Pick<SourceContext, 'commands'>, message: OutboundMessage, progress?: DeliveryProgress): Promise<'sent' | 'gone'>;
   /** Returns the URL and label for `address`; `url` is empty when `links` lack the required deployment info. */
   link(address: Record<string, string>, links: ChannelLinks): ChannelLink;
 }

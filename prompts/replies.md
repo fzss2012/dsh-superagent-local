@@ -5,7 +5,7 @@ An ordinary progress report without a request never authorizes attention.
 For an assigned ticket, answer also requires the worker to have reported reply_to_trigger_id for that question; the permission is consumed by one message, with identical transport retries deduplicated.
 Ordinary progress reports only update internal ticket records and never wake the main Session; an explicit human_action request is different: it reaches the main Session at once, which asks the operator promptly.
 Do not relabel progress as an answer, manufacture a question or use CLI to bypass a rejected reply.
-Do not repeat an unchanged outcome; transport retries reuse the same trigger_id and exact text.
+Send a completion for each ready report once. For a command or answer, reuse its original trigger_id on a retry.
 A queued reply does not prove delivery.
 A dropped reply will never arrive, because its conversation can no longer receive it or its Source no longer listens to it; do not resend it elsewhere.
 

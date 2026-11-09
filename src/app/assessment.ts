@@ -60,7 +60,7 @@ export interface AssessorHost {
   threadContext(trigger: Trigger): TriggerContext | undefined
   /** Delivers a candidate card to the main Session once per request ID, resolving after the Session receives it. */
   deliver(requestId: string, text: string): Promise<void>
-  candidateCard(candidate: Candidate): Promise<Record<string, unknown>>
+  candidateCard(candidate: Candidate): Record<string, unknown> | Promise<Record<string, unknown>>
 }
 
 /** Schema for bounded context or repository read requests during an active evaluation (`orchestrator_eval_read`). */
@@ -90,7 +90,7 @@ export class MasterAssessor implements Assessor {
   /** Per-evaluation read caches and thread contexts, keyed by `evalId`. */
   private readonly evals = new Map<string, EvalReads>()
   private readonly controller = new AbortController()
-  /** Registers the handler that relays each Eval's candidate card, which a link lookup may delay for seconds. */
+  /** Registers the handler that relays each Eval's candidate card. */
   constructor(private readonly host: AssessorHost) {
     // Start the evaluation deadline only after the main Session receives the candidate card, so a busy Session does not consume evaluation time.
     host.effects.handle('assessment', async ({ triggerId }, evalId) => {

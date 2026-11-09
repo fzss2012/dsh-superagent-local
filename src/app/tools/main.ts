@@ -4,15 +4,15 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { realpathSync, statSync } from 'node:fs'
 import { join, sep } from 'node:path'
 import { z } from 'zod'
-import type { Project } from '../../deployment.ts'
-import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople, type Ticket }
+import { UserError, followupOwners, key, reasonText, type Decision, type DecisionKind, type EngineForMainSession, type EngineForPeople }
   from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
+import { allowedSender } from '../../policy.ts'
 import { AssessmentSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
 import { ticketCard } from '../cards.ts'
 import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
 import { readResource, type MainResourceHost, type ResourceHost } from '../resources.ts'
-import { applyTicket as applyTicketToProject } from '../apply.ts'
+import { applyTicket as applyTicketToProject, type ApplyHost } from '../apply.ts'
 import type { Sessions } from '../sessions.ts'
 import type { Settings } from '../settings.ts'
 import type { Store } from '../store.ts'
@@ -21,14 +21,10 @@ import { AcknowledgementSchema, readTool, tool, type Tool } from './tool.ts'
 const RoutingNoteSchema = z.string().trim()
   .refine(text => wordCount(text) <= NOTE_WORDS, `Routing note must not exceed ${NOTE_WORDS} words (Chinese uses word segmentation). Shorten it; do not split it across deliveries.`)
   .describe(`Optional routing background or explicit human constraint, at most ${NOTE_WORDS} words. Never add implementation instructions or replace the original source.`)
-export interface MainToolsHost {
+export interface MainToolsHost extends ApplyHost {
   readonly context: Context
-  /** Absolute state directory; tool arguments that name files are confined to the ticket's artifacts directory under it. */
-  readonly stateDir: string
-  /** The local project a ticket works on, in local-project mode. */
-  readonly project: (ticket: Ticket) => Project | undefined
   readonly engine: Pick<EngineForMainSession, 'decide' | 'attach' | 'reply' | 'requestStatus' | 'note'> & EngineForPeople
-  readonly store: Pick<Store, 'tickets' | 'triggers' | 'threads' | 'atomic' | 'replyStatus' | 'settings'>
+  readonly store: ApplyHost['store'] & Pick<Store, 'threads' | 'atomic' | 'replyStatus'>
   readonly prompts: Pick<Prompts, 'preview' | 'save'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery' | 'modelRetry'>
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
@@ -36,7 +32,7 @@ export interface MainToolsHost {
   readonly resources: ResourceHost
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
-  sendReplies(): Promise<void>
+  sendReplies(id: string): Promise<void>
   /** Runs an Engine command initiated by the main Session without emitting self-notifications. */
   quietly<T>(run: () => T): T
 }
@@ -190,9 +186,9 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
     }),
     tool({
       name: 'orchestrator_ticket_apply',
-      description: 'Apply a finished ticket to its local project on an explicit human request (the user says 应用/合并/apply): git mode merges its agent branch into the project checkout, copy mode syncs the ticket copy back over the project after a backup. Refuses when the project checkout is dirty or the ticket is not finished.',
-      schema: z.object({ ticket_id: z.string() }).strict(),
-      execute: async args => applyTicketToProject(host, args.ticket_id),
+      description: 'Apply ready local work on an explicit operator command (应用, 合并, or apply). Supply the ticket ID and the original command trigger ID.',
+      schema: z.object({ ticket_id: z.string(), trigger_id: z.string() }).strict(),
+      execute: async args => applyTicketToProject(host, args.ticket_id, args.trigger_id),
     }),
     tool({
       name: 'orchestrator_ticket_request_status',
@@ -254,7 +250,7 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       name: 'orchestrator_reply',
       description: `Send an answer to a human question, a ready result, or attention requiring human action, as the replies section says; the gate refuses anything else, such as progress. purpose=result needs a ticket in person/review after a ready report, a completed or merged one, or a dropped one whose matched rule asks for a closing message. IM limit: ${IM_WORDS} words.`,
       schema: z.object({
-        trigger_id: z.string().optional().describe('The original human question, for an answer only.'),
+        trigger_id: z.string().optional().describe('The original human question or command to reply to. Omit for an unsolicited ticket completion.'),
         ticket_id: z.string().optional(),
         purpose: z.enum(['answer', 'result', 'attention']),
         human_action: z.string().trim().min(1).optional().describe('Required for attention: the ticket\'s current attention question.'),
@@ -263,11 +259,18 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
           .describe('Absolute paths of files to send after the text, such as the ticket artifacts result.md, diff.patch or screenshots. Only files inside this ticket\'s artifacts directory (DSH_SUPERAGENT_ARTIFACTS) are accepted.'),
       }).strict(),
       execute: async args => {
+        if (args.purpose === 'result' && args.trigger_id) {
+          const trigger = host.store.triggers.get(args.trigger_id)
+          const ticket = args.ticket_id ? host.store.tickets.get(args.ticket_id) : undefined
+          if (trigger?.source === 'feishu' && trigger.id !== ticket?.origin.triggerId && !allowedSender(host.store.settings(), trigger.actor)) {
+            throw new Error('A ticket result requested in Feishu requires an allowed operator')
+          }
+        }
         const attachments = attachmentPaths(host, args.ticket_id, args.attachments)
         const reply = host.engine.reply({ purpose: args.purpose, text: args.text, ...(args.trigger_id ? { triggerId: args.trigger_id } : {}),
           ...(args.ticket_id ? { ticketId: args.ticket_id } : {}), ...(args.human_action ? { question: args.human_action } : {}),
           ...attachments ? { attachments } : {} })
-        await host.sendReplies()
+        if (reply.status === 'pending') await host.sendReplies(reply.id)
         return { status: host.store.replyStatus(reply.id) ?? reply.status }
       },
     }),

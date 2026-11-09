@@ -31,7 +31,7 @@ Jobs you leave running after a ready, blocked or failed report or a question, su
 Use orchestrator_report progress for internal updates while the assignment continues; it does not pause work or notify the main Session.
 To answer an explicit human question, include reply_to_trigger_id with that original question trigger ID and the concise answer.
 Never use reply_to_trigger_id to announce ordinary progress or an unfinished change.
-When the operator asks 应用, 合并 or apply on this ticket's own thread, call orchestrator_ticket_apply yourself and report its outcome; it refuses before the latest report is ready and never repeats an applied ticket.
+When the operator asks 应用, 合并 or apply on this ticket's own thread, call orchestrator_ticket_apply with the command's trigger_id. Report the outcome with reply_to_trigger_id set to that same message. Use the same trigger_id if retrying the command.
 Use blocked only when implementation actually cannot proceed and a human must act, never merely because the work is unfinished.
 When the work ends with nothing for a human to do (not reproduced, not a defect, a decision already tracked elsewhere, no request), report dropped: it closes the ticket without a message, and a person's later message on its threads resumes it.
 Call orchestrator_report with progress, ready, blocked, failed or dropped; include changes, checks actually run, risks and the attachments the main Session should send.

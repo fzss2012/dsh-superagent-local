@@ -2,11 +2,11 @@
 import { copyFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
-import type { OutboundAttachment, OutboundMessage } from '../core/index.ts'
+import { key, type OutboundAttachment, type OutboundMessage } from '../core/index.ts'
 import { CliError } from '../infra/commands.ts'
 import { checkedImText } from '../infra/text.ts'
 import type { SourceContext } from './host.ts'
-import type { ChannelLink, ChannelLinks } from './kind.ts'
+import type { ChannelLink, ChannelLinks, DeliveryProgress } from './kind.ts'
 import { feishuTriggerId } from './feishu-trigger.ts'
 
 /** Feishu or Lark AppLink that opens a chat; used when the message's own link was not delivered with the event. */
@@ -18,10 +18,9 @@ export const feishuChatLink = (brand: 'feishu' | 'lark', chatId: string): string
  */
 const gone = (error: unknown): boolean => error instanceof CliError && error.code !== undefined && (error.code === 230011
   || /withdrawn/i.test(error.message) || (Math.floor(error.code / 100) === 2300 && /not found/i.test(error.message)))
-/** Replies in the topic of the target message; Feishu keeps at most one reply per idempotency key (the outgoing message's `message.id`). */
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
 /** Sends one attachment as a separate thread reply; lark-cli accepts only cwd-relative local paths, so the file is copied into a temporary directory. */
-async function sendAttachment(host: Pick<SourceContext, 'commands'>, messageId: string, attachment: OutboundAttachment, index: number): Promise<void> {
+async function sendAttachment(host: Pick<SourceContext, 'commands'>, messageId: string, attachment: OutboundAttachment, id: string): Promise<void> {
   const name = basename(attachment.name ?? attachment.path)
   const temporary = await mkdtemp(join(tmpdir(), 'dsh-superagent-attach-'))
   try {
@@ -29,22 +28,29 @@ async function sendAttachment(host: Pick<SourceContext, 'commands'>, messageId: 
     await copyFile(attachment.path, local)
     const kind = attachment.kind ?? (IMAGE_EXTENSIONS.has(extname(name).toLowerCase()) ? 'image' : 'file')
     const reply = ['im', '+messages-reply', '--message-id', messageId, kind === 'image' ? '--image' : '--file', `./${name}`,
-      '--reply-in-thread', '--idempotency-key', `${messageId}:${index}:${name}`]
+      '--reply-in-thread', '--idempotency-key', id]
     await host.commands.lark(reply, temporary)
   } finally { await rm(temporary, { recursive: true, force: true }).catch(() => { /* Best effort; the OS clears tmp. */ }) }
 }
 /**
- * Replies in the topic of the target message; Feishu keeps at most one reply per idempotency key (the outgoing message's
- * `message.id`). Attachments follow the text as separate replies in the same topic, each under its own idempotency key.
+ * Replies in the topic of the target message. Checkpoint each confirmed part so a failed upload retries from that part.
  */
-export async function sendFeishu(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'> {
+export async function sendFeishu(host: Pick<SourceContext, 'commands'>, message: OutboundMessage, progress?: DeliveryProgress): Promise<'sent' | 'gone'> {
   const messageId = message.channel.address.messageId
   if (!messageId) throw new Error('Missing Feishu reply target')
-  const text = checkedImText(message.text)
-  const reply = ['im', '+messages-reply', '--message-id', messageId, '--markdown', text, '--reply-in-thread', '--idempotency-key', message.id]
+  const nextPart = progress?.nextPart ?? 0
   try {
-    await host.commands.lark(reply)
-    for (const [index, attachment] of (message.attachments ?? []).entries()) await sendAttachment(host, messageId, attachment, index)
+    if (nextPart === 0) {
+      const text = checkedImText(message.text)
+      await host.commands.lark(['im', '+messages-reply', '--message-id', messageId, '--markdown', text,
+        '--reply-in-thread', '--idempotency-key', message.id])
+      if (message.attachments?.length) progress?.sent(1)
+    }
+    const attachments = message.attachments ?? []
+    for (let index = Math.max(0, nextPart - 1); index < attachments.length; index++) {
+      await sendAttachment(host, messageId, attachments[index]!, key('attachment', message.id, String(index)))
+      progress?.sent(index + 2)
+    }
   } catch (error) {
     if (gone(error)) return 'gone'
     throw error

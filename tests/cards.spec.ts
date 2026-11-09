@@ -115,7 +115,7 @@ const RULES: [rule: string, file: string, says: string[], gone?: string[]][] = [
     ['Begin every message posted on GitHub', 'GitHub', 'auto-merge']],
   ['The operator applies a finished ticket with the apply tool, never the agent on its own', 'dispatch',
     ['应用 <id>, 合并 <id> or apply <id>: orchestrator_ticket_apply with the ticket id',
-      'git mode merges the agent branch into the project\'s current branch, refusing while the project checkout has uncommitted changes']],
+      'the command\'s trigger_id', 'Copy mode backs up the project and checks it against the original snapshot before syncing']],
   ['The main Session sends the ticket\'s artifacts instead of pasting them', 'dispatch',
     ['Send the result once: one short sentence naming the outcome, then the ticket\'s result.md, diff.patch and any screenshots',
       'never paste their contents']],

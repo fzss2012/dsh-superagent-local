@@ -17,6 +17,15 @@ export interface LinkHost {
   readonly lifetime: AbortSignal
 }
 
+/** Uses the retained message and any available link without a subprocess. */
+export function retainedSourceLink(host: Pick<LinkHost, 'links'>, trigger: Trigger): { source_url?: string; source_url_read?: string } {
+  if (trigger.url) return { source_url: trigger.url }
+  const ref = feishuRef(trigger)
+  if (!ref) return {}
+  const cached = host.links.get(`${ref.chatId}:${ref.messageId}`)
+  return cached ? { source_url: cached } : { source_url_read: `feishu/${trigger.id}/message` }
+}
+
 /** Resolves and caches a trigger's external message URL, falling back to a readable resource path when lookup fails. */
 export async function sourceLink(host: LinkHost, trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }> {
   if (trigger.url) return { source_url: trigger.url }
@@ -33,7 +42,7 @@ export async function sourceLink(host: LinkHost, trigger: Trigger, signal?: Abor
     host.lifetime.throwIfAborted()
     signal?.throwIfAborted()
     // Optional link enrichment may fail independently of the retained source message.
-    return { source_url_read: `feishu/${trigger.id}/message` }
+    return retainedSourceLink(host, trigger)
   }
   host.links.set(cacheKey, url)
   return { source_url: url }
@@ -52,7 +61,7 @@ function referencedTickets(host: LinkHost, trigger: Trigger, known: readonly Tic
   return [...ids].flatMap(id => host.store.tickets.get(id) ?? []).slice(0, 4)
 }
 /** Builds the main Session's candidate card with routing metadata, handback history, and related or referenced tickets. */
-export async function candidateCard(host: LinkHost, candidate: Candidate) {
+export function candidateCard(host: LinkHost, candidate: Candidate) {
   const primary = candidate.triggers.at(-1)!
   const settings = host.store.settings()
   const delivered = host.store.triggers.disposition(primary.id)?.fanout ?? []
@@ -62,7 +71,7 @@ export async function candidateCard(host: LinkHost, candidate: Candidate) {
     .map(item => ({ trigger_id: trigger.id, ticket_id: item.ticketId, reason: item.reason })))
   // Format the primary trigger like a worker input (including the message it replies to) and summarize earlier batch triggers as cards.
   const others = candidate.triggers.filter(trigger => trigger.id !== primary.id)
-  return { ...triggerMessage(primary, await sourceLink(host, primary), undefined, repliedTo(host, primary)), strength: candidate.strength,
+  return { ...triggerMessage(primary, retainedSourceLink(host, primary), undefined, repliedTo(host, primary)), strength: candidate.strength,
     mode: settings.eval.mode, ...others.length ? { batch: others.map(trigger => triggerCard(trigger)) } : {},
     ...handedBack.length ? { handed_back: handedBack } : {}, ...relatedTickets(candidate.tickets),
     ...(delivered.length ? { delivered_to: delivered } : {}), ...(referenced.length ? { referenced_tickets: referenced.map(ticketCard) } : {}),

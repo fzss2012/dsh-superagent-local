@@ -2,13 +2,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { mkdir, rmdir, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rename, rm, rmdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { key, latestAssignment, latestReport, liveTicket, runningAssignment, threadKey, waitsForPerson } from '../core/index.ts'
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine, Project } from '../deployment.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
+import { withinDirectory } from '../infra/paths.ts'
 import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
 import { Later, type Effects } from '../app/effects.ts'
@@ -78,7 +79,7 @@ export interface ExecutorHost {
   environment(ticket: Ticket): Variable[]
   /** Local project this ticket works on, when the installation runs in local-project mode. */
   project(ticket: Ticket): Project | undefined
-  sourceLink(trigger: Trigger, signal?: AbortSignal): Promise<{ source_url?: string; source_url_read?: string }>
+  sourceLink(trigger: Trigger): { source_url?: string; source_url_read?: string }
   /** Stored Trigger of the message `trigger` replies to, when it replies to one. */
   repliedTo(trigger: Trigger): Trigger | undefined
 }
@@ -264,33 +265,42 @@ export class DshExecutor implements Executor {
       throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)
     }
     try {
-      if (local && command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
-      else if (local) await this.prepareLocalProject(local, ticket, directory, signal)
-      else if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
+      const snapshot = local?.mode === 'copy' ? await this.snapshotProject(local, ticket, signal) : undefined
+      if (command) await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
+      else if (snapshot) await this.prepareCopy(snapshot, directory, signal, env)
+      else if (local) await this.prepareGitProject(local, ticket, directory, signal, env)
     } catch (error) { await failure(error) }
     await mkdir(directory, { recursive: true })
     await mkdir(join(this.host.machine.stateDir, 'artifacts', ticket.id), { recursive: true })
     await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)
   }
-  /**
-   * Prepares a local project workspace for a ticket: in git mode a worktree on an agent branch, in copy mode a snapshot of the
-   * project folder followed by a copy. Built-in preparation replaces the deployment-wide prepare command in local mode.
-   */
-  private async prepareLocalProject(project: Project, ticket: Ticket, directory: string, signal: AbortSignal): Promise<void> {
-    const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+  private async prepareGitProject(project: Project, ticket: Ticket, directory: string, signal: AbortSignal, env: Record<string, string>): Promise<void> {
     const branch = `agent/${ticket.execution?.name ?? `ticket-${ticket.id.slice(0, 12)}`}`
-    const env = Object.fromEntries(this.host.environment(ticket).map(variable => [variable.key, variable.value]))
-    if (project.mode === 'git') {
-      const base = project.base || 'HEAD'
-      const command = `git -C ${quote(project.path)} worktree add -b ${quote(branch)} ${quote(directory)} ${quote(base)}`
-      await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
-      return
+    await runAsWorker(this.host.context.subprocess, ['git', '-C', project.path, 'worktree', 'add', '-b', branch,
+      '--', directory, project.base || 'HEAD'], dirname(directory), signal, env)
+  }
+  /** The same archive supplies the work copy and the apply-time baseline. */
+  private async snapshotProject(project: Project, ticket: Ticket, signal: AbortSignal): Promise<string> {
+    const path = await realpath(project.path)
+    const stateDir = await realpath(this.host.machine.stateDir)
+    if (withinDirectory(path, stateDir) || withinDirectory(path, await realpath(dirname(ticket.execution!.directory)))) {
+      throw new Error('A copy-mode project must not contain the state or ticket workspace directory')
     }
-    const snapshotDir = join(this.host.machine.stateDir, 'snapshots')
+    const snapshotDir = join(stateDir, 'snapshots')
     await mkdir(snapshotDir, { recursive: true })
     const snapshot = join(snapshotDir, `${ticket.execution?.name ?? ticket.id}.tar.gz`)
-    const command = `tar -czf ${quote(snapshot)} -C ${quote(project.path)} . && mkdir -p ${quote(directory)} && cp -a ${quote(project.path)}/. ${quote(directory)}/`
-    await runAsWorker(this.host.context.subprocess, ['sh', '-c', command], dirname(directory), signal, env)
+    await runAsWorker(this.host.context.subprocess, ['tar', '-czf', snapshot, '-C', path, '.'], snapshotDir, signal)
+    return snapshot
+  }
+  private async prepareCopy(snapshot: string, directory: string, signal: AbortSignal, env: Record<string, string>): Promise<void> {
+    const parent = dirname(directory)
+    const staging = await mkdtemp(join(parent, '.copy-'))
+    try {
+      await runAsWorker(this.host.context.subprocess, ['tar', '-xzpf', snapshot, '-C', staging], parent, signal, env)
+      await rename(staging, directory)
+    } finally {
+      await rm(staging, { recursive: true, force: true })
+    }
   }
   /** Enqueues a `launch` effect for an accepted or resumed assignment; launches start in queue order as worker slots free up. */
   start(ticket: Ticket, assignment: Assignment): void {
@@ -359,7 +369,7 @@ export class DshExecutor implements Executor {
     } finally { if (woken) this.slots.free(ticketId) }
   }
   private async deliverInput(ticket: Ticket, assignment: Assignment, input: TicketInput): Promise<void> {
-    // Re-check right before session delivery because the ticket may have ended while awaiting `sourceLink`.
+    // Re-check right before session delivery because the ticket may have ended while the Session was resolving.
     const live = () => {
       const current = this.host.store.tickets.get(ticket.id)
       if (!current || !liveTicket(current) || runningAssignment(current)?.id !== assignment.id) throw new Error('The ticket ended or another Assignment took it over')
@@ -367,19 +377,19 @@ export class DshExecutor implements Executor {
       if (this.stopping.has(ticket.id)) throw new Later('The worker\'s background work is stopping')
     }
     live()
-    const trigger = input.kind === 'trigger' ? await this.triggerCard(ticket, input.triggerId, input.note) : undefined
+    const trigger = input.kind === 'trigger' ? this.triggerCard(ticket, input.triggerId, input.note) : undefined
     const message = inputMessage(input, trigger)
     if (message === undefined) return
     const text = message.length > ASSIGNMENT_CHARS ? JSON.stringify(capped(message, ASSIGNMENT_CHARS, inputResource(ticket.id, input.id))) : message
     await this.host.sessions.prompt(workerSessionId(ticket.id), input.id, text, 'steer', live)
   }
   /** Formats a trigger on `ticket` for the worker, including a preview of the replied-to message when the worker has not yet seen it. */
-  private async triggerCard(ticket: Ticket, triggerId: string, note?: string): Promise<object | undefined> {
+  private triggerCard(ticket: Ticket, triggerId: string, note?: string): object | undefined {
     const trigger = this.host.store.triggers.get(triggerId)
     if (!trigger) return undefined
     const parent = this.host.repliedTo(trigger)
     const seen = parent && (parent.id === ticket.origin.triggerId || ticket.inputs.some(item => item.kind === 'trigger' && item.triggerId === parent.id))
-    return triggerMessage(trigger, await this.host.sourceLink(trigger), note, seen ? undefined : parent)
+    return triggerMessage(trigger, this.host.sourceLink(trigger), note, seen ? undefined : parent)
   }
   /**
    * After the ending transaction commits (so a rollback leaves the worker working, and a launch the same transaction queued
@@ -487,8 +497,7 @@ export class DshExecutor implements Executor {
     const retried = ticket.assignments.at(-2)?.endedReason === 'retried' ? { note: RETRIED } : {}
     const assignmentText = ticket.execution?.assignment ?? ''
     const { text: brief, chars, read } = capped(assignmentText, ASSIGNMENT_CHARS, `ticket/${ticket.id}/assignment`)
-    const card = told || !source ? undefined : await this.triggerCard(ticket, source.id)
-    if (!current()) return
+    const card = told || !source ? undefined : this.triggerCard(ticket, source.id)
     const batch = told ? [] : batchOf(this.host, ticket).map(batchLine)
     const text = told ? JSON.stringify({ ticket_id: ticket.id, assignment: ticket.assignments.length, ...retried })
       : JSON.stringify({ ticket_id: ticket.id, title: ticket.title, ...(brief ? { assignment: brief } : {}),

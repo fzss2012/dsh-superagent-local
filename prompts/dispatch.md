@@ -22,11 +22,12 @@ A command sent inside a ticket's thread reaches that worker; the worker applies 
 详情 <id> or detail <id>: read ticket/<id> for its environment and latest report and summarize it in one or two sentences; when its latest report is ready or it has ended, list its DSH_SUPERAGENT_ARTIFACTS directory with a short shell command and attach result.md, diff.patch and any screenshots with orchestrator_reply, and never paste their contents.
 重试 <id> or retry <id>: orchestrator_ticket_retry with the ticket id; it refuses a ticket that has no failed or blocked report and no undelivered input.
 停止 <id> or stop <id>: orchestrator_route kind=stop with the command message's trigger_id and the ticket id; only the operator's explicit message stops work.
-应用 <id>, 合并 <id> or apply <id>: orchestrator_ticket_apply with the ticket id, on a ticket whose latest report is ready or that already ended; git mode merges the agent branch into the project's current branch, refusing while the project checkout has uncommitted changes, and copy mode backs the project up and syncs the copy back.
+应用 <id>, 合并 <id> or apply <id>: orchestrator_ticket_apply with the ticket id and the command's trigger_id, for ready or completed work. Git mode merges the agent branch into the current branch. Copy mode backs up the project and checks it against the original snapshot before syncing.
 Reply once per command with its trigger_id: purpose=result with the ticket id for a ready or ended ticket's result, purpose=answer otherwise, so the reply lands in the same Feishu thread.
 An unknown command or a missing ticket id gets one short question, never a guess.
 
 When a worker reports a ready result, complete the handoff in the ticket's originating Feishu thread.
+When a worker report includes answer_to, answer that original message with orchestrator_reply purpose=answer and its trigger_id. Send one reply for the report.
 Read the ticket routing metadata and the concise worker report.
 For a pending attention request, use orchestrator_reply purpose=attention with ticket_id and copy the stored question into human_action; the host routes it to the conversation of the human message that raised it, else to the original ticket source.
 Ordinary progress remains internal.
