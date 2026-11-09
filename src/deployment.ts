@@ -82,7 +82,7 @@ export const GithubAccountsSchema = z.object({
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 export const ProjectSchema = z.object({
   name: z.string().trim().min(1).max(60),
-  path: z.string().trim().regex(/^\//, 'Absolute path'),
+  path: z.string().trim().regex(/^(?:[A-Za-z]:[\\/]|\/)/, 'Absolute path'),
   mode: z.enum(['git', 'copy']),
   chatId: z.string().trim().regex(/^oc_[A-Za-z0-9]+$/, 'oc_...').or(z.literal('')),
   base: z.string().trim().default(''),
