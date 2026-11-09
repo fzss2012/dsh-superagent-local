@@ -1,5 +1,6 @@
 node_modules/
-lib/
+# lib/ is the built bundle: DSH installs git dependencies as-is (no build
+# step), so the compiled entry point must be committed.
 .artifacts/
 .env
 coverage/
