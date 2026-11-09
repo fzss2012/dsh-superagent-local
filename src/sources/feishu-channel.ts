@@ -20,7 +20,8 @@ const gone = (error: unknown): boolean => error instanceof CliError && error.cod
   || /withdrawn/i.test(error.message) || (Math.floor(error.code / 100) === 2300 && /not found/i.test(error.message)))
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
 /** Sends one attachment as a separate thread reply; lark-cli accepts only cwd-relative local paths, so the file is copied into a temporary directory. */
-async function sendAttachment(host: Pick<SourceContext, 'commands'>, messageId: string, attachment: OutboundAttachment, id: string): Promise<void> {
+async function sendAttachment(host: Pick<SourceContext, 'commands'>, messageId: string, attachment: OutboundAttachment, id: string,
+  progress?: DeliveryProgress): Promise<void> {
   const name = basename(attachment.name ?? attachment.path)
   const temporary = await mkdtemp(join(tmpdir(), 'dsh-superagent-attach-'))
   try {
@@ -29,6 +30,7 @@ async function sendAttachment(host: Pick<SourceContext, 'commands'>, messageId: 
     const kind = attachment.kind ?? (IMAGE_EXTENSIONS.has(extname(name).toLowerCase()) ? 'image' : 'file')
     const reply = ['im', '+messages-reply', '--message-id', messageId, kind === 'image' ? '--image' : '--file', `./${name}`,
       '--reply-in-thread', '--idempotency-key', id]
+    progress?.start()
     await host.commands.lark(reply, temporary)
   } finally { await rm(temporary, { recursive: true, force: true }).catch(() => { /* Best effort; the OS clears tmp. */ }) }
 }
@@ -42,13 +44,14 @@ export async function sendFeishu(host: Pick<SourceContext, 'commands'>, message:
   try {
     if (nextPart === 0) {
       const text = checkedImText(message.text)
+      progress?.start()
       await host.commands.lark(['im', '+messages-reply', '--message-id', messageId, '--markdown', text,
         '--reply-in-thread', '--idempotency-key', message.id])
-      if (message.attachments?.length) progress?.sent(1)
+      progress?.sent(1)
     }
     const attachments = message.attachments ?? []
     for (let index = Math.max(0, nextPart - 1); index < attachments.length; index++) {
-      await sendAttachment(host, messageId, attachments[index]!, key('attachment', message.id, String(index)))
+      await sendAttachment(host, messageId, attachments[index]!, key('attachment', message.id, String(index)), progress)
       progress?.sent(index + 2)
     }
   } catch (error) {

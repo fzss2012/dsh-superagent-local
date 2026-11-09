@@ -7,7 +7,7 @@ Ordinary progress reports only update internal ticket records and never wake the
 Do not relabel progress as an answer, manufacture a question or use CLI to bypass a rejected reply.
 Send a completion for each ready report once. For a command or answer, reuse its original trigger_id on a retry.
 A queued reply does not prove delivery.
-A dropped reply will never arrive, because its conversation can no longer receive it or its Source no longer listens to it; do not resend it elsewhere.
+A dropped reply has stopped retrying. If Feishu delivery was unconfirmed, some parts may already have arrived. Leave the existing receipt for the operator to review.
 
 Detail travels as a file, not as text.
 The reply tool sends the files named in attachments after the text, as separate replies in the same thread: png, jpg, webp and gif become image messages, everything else a file message.
@@ -25,7 +25,7 @@ Read the original source to judge whether it requests work; do not acknowledge w
 Answer quick questions directly without an extra acknowledgement.
 Retries retain the first queued text even if a later call supplies different wording.
 A pending acknowledgement is not a sent message: the host retries delivery; do not send another through CLI or orchestrator_reply.
-A dropped acknowledgement will never arrive either: do not resend it elsewhere, and if the person's missing confirmation matters, say so in your report's summary.
+A dropped acknowledgement has stopped retrying. If confirmation matters, mention the missing confirmation in your report's summary.
 Do not scan old history to backfill acknowledgements.
 The main Session routes and delivers answers and results; the worker owns acknowledging requests it is about to handle.
 

@@ -1,4 +1,4 @@
-import { B as Ticket, C as ChannelRef, I as Thread, L as ThreadFact, W as Trigger, g as SourceScope, h as ScopeResult, t as ReceiveResult, u as OutboundMessage, ut as Deployment, y as AdmissionCell, z as ThreadRef } from "./intake-CNf1Pep8.js";
+import { B as Ticket, C as ChannelRef, I as Thread, L as ThreadFact, W as Trigger, g as SourceScope, h as ScopeResult, t as ReceiveResult, u as OutboundMessage, ut as Deployment, y as AdmissionCell, z as ThreadRef } from "./intake-CmpQtKPh.js";
 import { Context } from "@deepseek-ai/cordis";
 import { z } from "zod";
 import { DatabaseSync } from "node:sqlite";
@@ -855,6 +855,8 @@ type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>;
 /** Confirmed parts of a multipart reply, in delivery order starting with the text. */
 interface DeliveryProgress {
   readonly nextPart: number;
+  /** Record the attempt immediately before the external send. Throws if retrying is unsafe. */
+  start(): void;
   sent(nextPart: number): void;
 }
 /** Outbound messaging adapter for a source kind's threads. */

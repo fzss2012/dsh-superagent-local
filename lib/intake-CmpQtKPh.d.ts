@@ -626,7 +626,7 @@ interface OutboundAttachment {
   name?: string;
   kind?: 'image' | 'file';
 }
-/** A queued message waits (`pending`), went out (`sent`), or was dropped because its conversation can never receive it (`dropped`). */
+/** A queued message waits (`pending`), went out (`sent`), or automatic delivery stopped (`dropped`). */
 type ReplyStatus = 'pending' | 'sent' | 'dropped';
 /** The messages queued for Channels; the Engine queues them inside its commands, and a sender delivers them later. */
 interface Outbox {

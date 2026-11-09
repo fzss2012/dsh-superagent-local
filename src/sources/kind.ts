@@ -45,6 +45,8 @@ export type ChannelLinks = Partial<Pick<Deployment, 'repository' | 'feishu'>>
 /** Confirmed parts of a multipart reply, in delivery order starting with the text. */
 export interface DeliveryProgress {
   readonly nextPart: number
+  /** Record the attempt immediately before the external send. Throws if retrying is unsafe. */
+  start(): void
   sent(nextPart: number): void
 }
 /** Outbound messaging adapter for a source kind's threads. */

@@ -12,10 +12,16 @@ import { storeReads } from './store-read.ts'
 
 /** A Trigger's position on its thread timeline, ordered by timestamp and then `id` as tie-breaker. */
 export interface TimelinePlace { at: string; id: string }
-/** Why a message was dropped: its conversation can never receive it (`channelGone`), or its Source no longer listens to it (`channelIgnored`). */
-export type DropReason = 'channelGone' | 'channelIgnored'
+/** Why automatic delivery stopped. An unconfirmed Feishu reply may have reached the conversation. */
+export type DropReason = 'channelGone' | 'channelIgnored' | 'deliveryUnconfirmed'
 /** Outbound message receipt tracked in the outbox from the moment it is queued (`pending`, `sent`, or `dropped`); delivery attempt counts live on its `reply` effect. */
-export interface Receipt extends OutboundMessage { status: ReplyStatus; nextPart?: number; dropped?: { at: string; reason: DropReason } }
+export interface Receipt extends OutboundMessage {
+  status: ReplyStatus
+  nextPart?: number
+  /** First attempt for the current Feishu part. Null means unsent. Legacy receipts have no field. */
+  partAttemptedAt?: number | null
+  dropped?: { at: string; reason: DropReason }
+}
 /** A dropped outbound message receipt, with the timestamp and reason it was dropped. */
 export type Dropped = Receipt & { dropped: { at: string; reason: DropReason } }
 /** Saved settings snapshot with the policy version and ticket notifications it produced (`internal` saves have no origin). */
@@ -264,11 +270,15 @@ export class Store implements Repositories {
      * @returns Whether the message ID was newly recorded.
      */
     add: (message: OutboundMessage): boolean => {
-      const receipt: Receipt = { ...message, status: 'pending' }
+      const receipt: Receipt = { ...message, status: 'pending', ...message.channel.source === 'feishu' ? { partAttemptedAt: null } : {} }
       return Number(this.db.prepare('INSERT OR IGNORE INTO outbox (id, value) VALUES (?, ?)').run(message.id, JSON.stringify(receipt)).changes) > 0
     },
+    attempt: (id: string, at: number): void => {
+      this.db.prepare("UPDATE outbox SET value = json_set(value, '$.partAttemptedAt', ?) WHERE id = ? AND value ->> '$.status' = 'pending'")
+        .run(at, id)
+    },
     progress: (id: string, nextPart: number): void => {
-      this.db.prepare("UPDATE outbox SET value = json_set(value, '$.nextPart', ?) WHERE id = ? AND value ->> '$.status' = 'pending'")
+      this.db.prepare("UPDATE outbox SET value = json_set(value, '$.nextPart', ?, '$.partAttemptedAt', NULL) WHERE id = ? AND value ->> '$.status' = 'pending'")
         .run(nextPart, id)
     },
     /**
