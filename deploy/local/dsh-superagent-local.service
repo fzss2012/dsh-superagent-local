@@ -1,0 +1,35 @@
+# dsh-superagent-local 的 systemd unit（示例）
+#
+# 安装：
+#   sudo install -m 644 /home/ubuntu/dsh-superagent-local/deploy/local/dsh-superagent-local.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dsh-superagent-local
+#
+# 与现有 dsh-superagent.service（dsh superagent，127.0.0.1:3082）并列运行：
+# 不同 profile（superagent-local）、不同 stateDir、不同端口（3084），互不影响。
+# 注意：dsh 以「位置参数」方式启动 profile（dsh superagent-local），
+# scripts/dsh-superagent status 只匹配 --profile 形式，会误报 exit 1；
+# 请用 systemctl status 或管理 API GET state 判断健康。
+
+[Unit]
+Description=dsh-superagent-local (dsh --profile superagent-local, 127.0.0.1:3084)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=ubuntu
+Environment=HOME=/home/ubuntu
+Environment=DSH_HOME=/home/ubuntu/.dsh
+# 模型 key：正常情况下由 DSH 凭据 ~/.dsh/.credentials.yaml 的 refs 提供（与现有 superagent
+# 共用 DSH_HOME），不需要在这里写。若改用进程环境提供，取消下面注释或改用 EnvironmentFile
+#（unit 文件含密钥时注意权限：chmod 600，且 systemctl daemon-reload 后生效）：
+# Environment=OPENCODE_GO_API_KEY=<replace-with-key>
+# EnvironmentFile=/etc/dsh-superagent-local.env
+WorkingDirectory=/home/ubuntu/dsh-superagent-local
+ExecStart=/usr/local/bin/dsh superagent-local --no-open
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

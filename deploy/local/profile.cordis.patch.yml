@@ -1,0 +1,93 @@
+# dsh-superagent-local 的 profile 补丁层（示例，需替换所有 <...> 占位符）
+#
+# 目标文件：$DSH_HOME/profiles/superagent-local/cordis.patch.yml
+# 默认即 /home/ubuntu/.dsh/profiles/superagent-local/cordis.patch.yml
+#
+# 这个文件只写「机器级」配置（端口、stateDir、本地项目、模型、门户信任）；
+# Feishu Source 的 CLI/群列表/私聊开关、Policy 名单、Execution 参数都在面板里
+# （写入 stateDir 下的数据库），不在这个文件里。
+#
+# 安装步骤、占位符说明和验收命令见同目录 setup.md。
+
+# 面板/Web 服务监听地址。现有 superagent 实例占用 3082，本实例用 3084；
+# 只能绑回环地址（管理 API 要求 loopback，对外由 nginx 门户 /dsh5/ 暴露）。
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3084
+
+# dsh-superagent 插件配置。
+# stateDir 必须是绝对路径，且不能与现有 superagent 的 stateDir 共用（同一目录有进程锁）。
+# projects 非空 = 进入「本地项目模式」：不再需要 GitHub 仓库 / gh CLI；
+# 每个飞书群通过 chatId 映射到一个本地项目，工单在该项目的 worktree/副本里执行。
+- id: dsh-superagent
+  config:
+    # 数据库、锁、worker-bin、worker-gitconfig、artifacts、snapshots 和默认工单目录
+    # <stateDir>/work 都在这里；升级前备份 <stateDir>/orchestrator.sqlite（连同 -wal/-shm）。
+    stateDir: /home/ubuntu/.dsh/state/superagent-local
+    projects:
+      # 示例 1：git 模式。每个工单执行
+      #   git -C <path> worktree add -b "agent/<工单短名>" <stateDir>/work/<短名> <base 或 HEAD>
+      # path 必须是已存在的 git 工作树，且至少有一个提交（否则 worktree add HEAD 失败）。
+      - name: demo-git
+        path: /home/ubuntu/projects/demo-git
+        mode: git
+        # 飞书群 chat_id（oc_ 开头）。同一个群只应出现在一个项目上；
+        # 整个列表最多允许一个项目的 chatId 留空（留空 = 默认项目，兜底所有未映射的群）。
+        # 下面两个 oc_REPLACE 只是占位符：请换成真实群 id，否则两个项目会抢同一个群。
+        chatId: oc_REPLACE
+        # 可选：从哪个 commit-ish 创建工单分支；留空 = HEAD。
+        # base: main
+        # 可选：覆盖内置的 git worktree 准备命令（sh -c 执行，10 分钟超时，失败不自动重试）。
+        # prepare: git -C /home/ubuntu/projects/demo-git worktree add -b "agent/$DSH_SUPERAGENT_NAME" "$DSH_SUPERAGENT_DIR" HEAD
+
+      # 示例 2：copy 模式。先把 <path> 打包成 <stateDir>/snapshots/<短名>.tar.gz 快照，
+      # 再把整个目录复制到工单目录；工单只改副本，原目录不动。适合非 git 目录。
+      # 注意磁盘占用：每个工单一份完整副本 + 一份 tar.gz 快照。
+      - name: demo-copy
+        path: /home/ubuntu/projects/demo-copy
+        mode: copy
+        chatId: oc_REPLACE
+        # 可选：自定义准备命令（同上，覆盖内置 copy 流程）。
+        # prepare: rsync -a /home/ubuntu/projects/demo-copy/ "$DSH_SUPERAGENT_DIR"/
+
+# 启用飞书 Source。bundle 的 cordis.patch.yml 默认把它设为 disabled: true，
+# 这里改为 false；Source 的 bot CLI（~/.local/bin/lark-bot-local）在面板里配置。
+- id: dsh-superagent-feishu
+  disabled: false
+
+# 模型 provider：opencode-go，模型 deepseek-v4.1-flash（支持图片输入，飞书图片消息可用）。
+# apiKeyEnv 只是环境变量名：真实 key 来自 DSH 凭据（~/.dsh/.credentials.yaml 的 refs，
+# 由面板 Models 页保存）或进程环境。新 profile 与现有 superagent 共用 DSH_HOME，
+# 通常已经能解析到 OPENCODE_GO_API_KEY；否则在 systemd unit 里补 Environment= 或 ~/.dsh/.env。
+- id: llm-pi-ai
+  config:
+    providers:
+      opencode-go:
+        models:
+          - id: deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            input:
+              - text
+              - image
+        apiKeyEnv: OPENCODE_GO_API_KEY
+
+# 主 Session 和执行器 Session 的默认模型；工单 Execution 设置里可再覆盖。
+- id: agent-default-model
+  config:
+    provider: opencode-go
+    model: deepseek-v4.1-flash
+    reasoningEffort: max
+
+# 门户（nginx /dsh5/）反代需要：nginx 以 Host/Origin dsh.example.com 访问本实例，
+# 必须在信任列表里；直连 http://127.0.0.1:3084 始终被信任，不需要这段。
+# 不用门户时可以整段删掉；门户域名不同则改下面的值。
+- id: connection
+  config:
+    trustedHosts:
+      - dsh.example.com
+    # 门户注入的会话 cookie 由 mint-dsh-cookie.py 签发，其 --days 必须 <= 这里的值。
+    # 本机门户用 364 天，所以设 365（默认 30 天会导致门户 cookie 被实例判 401）。
+    cookieMaxAgeDays: 365
