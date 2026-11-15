@@ -70,8 +70,13 @@
             config:
               waitTimeoutMs: 5000
               maxWaitTimeoutMs: 5000
+          # 28 个 lark-* 只挂在这里：机器级根 ~/.agents/skills 已清空（2026-11-15 迁到
+          # ~/.dsh/skill-sets/lark，理由见 G:\comm\lark-attention-review\飞书类问题与规避-仅限superagent通道.md §5 V1）。
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs:
+                - C:/Users/sss/.dsh/skill-sets/lark
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
           - id: compaction
@@ -168,8 +173,13 @@
             config:
               waitTimeoutMs: 5000
               maxWaitTimeoutMs: 5000
+          # 28 个 lark-* 只挂在这里：机器级根 ~/.agents/skills 已清空（2026-11-15 迁到
+          # ~/.dsh/skill-sets/lark，理由见 G:\comm\lark-attention-review\飞书类问题与规避-仅限superagent通道.md §5 V1）。
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs:
+                - C:/Users/sss/.dsh/skill-sets/lark
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
           - id: compaction
