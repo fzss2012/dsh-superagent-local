@@ -13,6 +13,8 @@
 | `dsh-superagent-local.service` | systemd unit：`dsh superagent-local --no-open`，`User=ubuntu`，`DSH_HOME=/home/ubuntu/.dsh`，自动重启 |
 | `fake-lark-cli.sh` | 离线 E2E 用的假 lark-cli（可执行）：实现 dsh-superagent 实际调用的 auth/config/bot info/im 命令、事件消费、回复记录 |
 | `setup.md` | **操作手册（先读这个）**：前置条件、建 profile、本地项目、飞书自建应用权限/事件/发布、bot-only lark-cli + wrapper、systemd、门户 `/dsh5/`、验收、假 CLI 冒烟测试、排障 |
+| `windows/README.md` | **Windows 单机部署**：无 systemd 的启动/重启脚本、门户 cookie 有效期（`connection.cookieMaxAgeDays`）、反向隧道、锁窗口等 Windows 特有坑 |
+| `windows/superagent-local.ps1` | Windows 启动器（`status/start/stop/restart`）：以隐藏子进程跑 `dsh <profile> --no-open`，等面板端口；restart 会等过 `proper-lockfile` 的 30 秒 stale 窗口 |
 | `README.md` | 本文件 |
 
 ## 最短路径
